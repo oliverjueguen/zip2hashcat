@@ -220,9 +220,29 @@ class TestExtractHash:
         assert h.startswith("$pkzip$") and h.endswith("$/pkzip$")
         assert info["hashcat_mode"] == 17200
 
+    def test_zip2john_compatible_header(self, zipcrypto_single):
+        """Hash must start with $pkzip$C*2* — matching zip2john's check_bytes=2."""
+        h, _ = extract_hash(str(zipcrypto_single))
+        assert h.startswith("$pkzip$1*2*"), f"Expected $pkzip$1*2*, got: {h[:20]}"
+
+    def test_zip2john_entry_format(self, zipcrypto_single):
+        """Per-entry format: DT*0*CL*UL*CR*OF*OX*CT*DL*CS4*DATA (matching zip2john)."""
+        h, _ = extract_hash(str(zipcrypto_single))
+        # strip wrapper: $pkzip$1*2* ... *$/pkzip$
+        inner = h[len("$pkzip$1*2*"):-len("*$/pkzip$")]
+        fields = inner.split("*")
+        # DT: 1=compressed, 2=stored
+        assert fields[0] in ("1", "2")
+        # MT (magic type): always 0 in zip2john
+        assert fields[1] == "0", f"MT should be 0, got {fields[1]}"
+        # CS4: exactly 4 hex chars (2 bytes)
+        cs4 = fields[9]
+        assert len(cs4) == 4 and all(c in "0123456789abcdef" for c in cs4), \
+            f"CS4 should be 4 hex chars, got '{cs4}'"
+
     def test_multi_format(self, zipcrypto_multi):
         h, info = extract_hash(str(zipcrypto_multi))
-        assert h.startswith("$pkzip$2*")
+        assert h.startswith("$pkzip$2*2*")
         assert info["hashcat_mode"] == 17220
 
     def test_stored_format(self, zipcrypto_stored):
@@ -281,8 +301,8 @@ class TestEdgeCases:
         assert info.encryption_type == "zipcrypto"
         assert len(info.encrypted_entries) == 1
 
-    def test_checkbyte_data_descriptor_flag(self, tmp_path):
-        """When bit 3 is set, check byte must use mod_time, not crc32."""
+    def test_check4_data_descriptor_flag(self, tmp_path):
+        """When bit 3 set, check4 = full mod_time (2 bytes), matching zip2john TS_chk."""
         content = b"streaming mode content"
         data = _build_zipcrypto_zip(
             [(content, "file.txt", True)], "test123", use_data_descriptor=True
@@ -292,18 +312,20 @@ class TestEdgeCases:
         info = _parse_zip_bytes(data, zipf)
         entry = info.encrypted_entries[0]
         assert entry.flags & 0x0008, "bit 3 should be set"
-        # check byte must come from mod_time, not crc32
-        expected = format((0x5A3C >> 8) & 0xFF, "02x")
-        assert entry.checksum_byte == expected
+        # zip2john: sprintf(cs, "%02x%02x", mod_time>>8, mod_time&0xFF)
+        MOD_TIME = 0x5A3C
+        expected = format(MOD_TIME >> 8, "02x") + format(MOD_TIME & 0xFF, "02x")
+        assert entry.check4 == expected
 
-    def test_checkbyte_no_data_descriptor(self, zipcrypto_single):
-        """Without bit 3, check byte comes from CRC32 high byte."""
+    def test_check4_no_data_descriptor(self, zipcrypto_single):
+        """Without bit 3, check4 = top 2 bytes of CRC32, matching zip2john CRC_chk."""
         data = zipcrypto_single.read_bytes()
         info = _parse_zip_bytes(data, zipcrypto_single)
         entry = info.encrypted_entries[0]
         assert not (entry.flags & 0x0008)
-        expected = format((entry.crc32 >> 24) & 0xFF, "02x")
-        assert entry.checksum_byte == expected
+        # zip2john: sprintf(cs, "%02x%02x", (crc>>24)&0xff, (crc>>16)&0xff)
+        expected = format((entry.crc32 >> 24) & 0xFF, "02x") + format((entry.crc32 >> 16) & 0xFF, "02x")
+        assert entry.check4 == expected
 
 
 # ── TestCLI ───────────────────────────────────────────────────────────────────

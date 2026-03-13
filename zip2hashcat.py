@@ -65,7 +65,8 @@ class ZipEntry:
     crc32: int
     compressed_size: int
     uncompressed_size: int
-    file_data_offset: int
+    file_data_offset: int       # absolute offset of first encrypted byte
+    local_header_offset: int = 0  # absolute offset of PK\x03\x04 signature
     mod_time: int = 0
     aes_strength: Optional[int] = None
     aes_actual_compression: Optional[int] = None
@@ -89,14 +90,25 @@ class ZipEntry:
         return self.compression_method != COMP_STORED
 
     @property
-    def checksum_byte(self) -> str:
-        # When bit 3 (data descriptor flag) is set, the ZIP was created in
-        # streaming mode: the encryptor used (mod_time >> 8) & 0xFF as the
-        # check byte instead of (crc32 >> 24) & 0xFF.
-        # hashcat uses this byte for a quick-check; wrong value = no matches.
+    def check4(self) -> str:
+        """4-char (2-byte) checksum matching zip2john's $pkzip$ CS field.
+
+        zip2john source:
+          FLAG_LOCAL_SIZE_UNKNOWN (bit 3) → use mod_time both bytes
+          otherwise                       → use top 2 bytes of CRC32
+
+        Format: sprintf(cs, "%02x%02x", high_byte, low_byte)
+        """
         if self.flags & FLAG_DATA_DESCRIPTOR:
-            return format((self.mod_time >> 8) & 0xFF, "02x")
-        return format((self.crc32 >> 24) & 0xFF, "02x")
+            # streaming mode: check bytes come from mod_time
+            return format((self.mod_time >> 8) & 0xFF, "02x") + format(self.mod_time & 0xFF, "02x")
+        # normal mode: check bytes come from top 2 bytes of CRC32
+        return format((self.crc32 >> 24) & 0xFF, "02x") + format((self.crc32 >> 16) & 0xFF, "02x")
+
+    @property
+    def checksum_byte(self) -> str:
+        """Single check byte (high byte of check4). For display/testing purposes."""
+        return self.check4[:2]
 
     @property
     def crc32_hex(self) -> str:
@@ -222,7 +234,8 @@ def _parse_zip_bytes(data: bytes, filepath: Path) -> ZipFileInfo:
         info.entries.append(ZipEntry(
             filename=filename, compression_method=compression, flags=flags,
             crc32=crc32, compressed_size=comp_size, uncompressed_size=uncomp_size,
-            file_data_offset=file_data_offset, mod_time=mod_time,
+            file_data_offset=file_data_offset, local_header_offset=local_header_offset,
+            mod_time=mod_time,
             aes_strength=aes_strength, aes_actual_compression=aes_actual_comp,
         ))
         pos += 46 + fname_len + extra_len + comment_len
@@ -251,31 +264,52 @@ def parse_zip(filepath: str) -> ZipFileInfo:
 
 
 def _extract_zipcrypto_hash(data: bytes, entries: List[ZipEntry]) -> str:
-    """Generate $pkzip$ hash for ZipCrypto from already-read bytes."""
+    """Generate $pkzip$ hash for ZipCrypto, matching zip2john's format exactly.
+
+    Format per entry (from zip2john.c):
+      DT * MT * CL * UL * CR * OF * OX * CT * DL * CS * DA
+      DT = 1 (compressed) or 2 (stored)
+      MT = 0 (magic type, always 0 for zipcrypto)
+      CL = compressed length (hex)
+      UL = uncompressed length (hex)
+      CR = CRC32 (hex)
+      OF = offset to local file header PK\\x03\\x04 (hex)
+      OX = extra offset from OF to first encrypted byte (hex)
+      CT = compression method (hex)
+      DL = encrypted data length (hex)
+      CS = 4-char checksum (2 bytes):
+           FLAG_DATA_DESCRIPTOR set → mod_time high byte + mod_time low byte
+           otherwise                → CRC32 byte3 + CRC32 byte2
+      DA = encrypted bytes (hex)
+
+    Overall: $pkzip$C*2* ... *$/pkzip$
+      C  = number of entries
+      2  = check_bytes count (zip2john always uses 2-byte check)
+    """
     parts = []
     for entry in entries:
-        # Use compressed_size from Central Directory (always correct, even with
-        # data descriptor records where the local header fields may be zero)
+        # compressed_size from Central Directory is always correct (even for
+        # data descriptor ZIPs where local header sizes may be zero)
         encrypted = data[entry.file_data_offset:entry.file_data_offset + entry.compressed_size]
         if len(encrypted) < 12:
             continue
         dt = 1 if entry.is_compressed else 2
-        cs = entry.checksum_byte
-        tc = format(entry.crc32 & 0xFFFF, "04x")
+        # OX = distance from local header to first encrypted byte
+        ox = entry.file_data_offset - entry.local_header_offset
         parts.append(
-            f"{dt}*2"
+            f"{dt}*0"
             f"*{entry.compressed_size:x}*{entry.uncompressed_size:x}"
-            f"*{entry.crc32_hex}*{entry.file_data_offset:x}*0"
+            f"*{entry.crc32_hex}*{entry.local_header_offset:x}*{ox:x}"
             f"*{entry.compression_method:x}"
             f"*{len(encrypted):x}"
-            f"*{cs}*{tc}"
+            f"*{entry.check4}"
             f"*{encrypted.hex()}"
         )
 
     if not parts:
         raise ValueError("Could not extract valid ZipCrypto data")
 
-    return f"$pkzip${len(parts)}*1*" + "*".join(parts) + "*$/pkzip$"
+    return f"$pkzip${len(parts)}*2*" + "*".join(parts) + "*$/pkzip$"
 
 
 def _extract_aes_hash(data: bytes, entries: List[ZipEntry]) -> str:
