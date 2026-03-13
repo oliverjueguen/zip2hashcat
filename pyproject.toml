@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zip2hashcat"
-version = "1.0.0"
+version = "1.1.0"
 description = "Extract ZIP password hashes in native hashcat format — no zip2john needed"
 readme = "README.md"
 license = "MIT"
