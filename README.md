@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-1.0.0-blueviolet">
+  <img src="https://img.shields.io/badge/Version-1.1.0-blueviolet">
   <img src="https://img.shields.io/badge/Python-3.10+-blue">
   <img src="https://img.shields.io/badge/Dependencies-None-green">
 </p>
@@ -84,11 +84,12 @@ pip install git+https://github.com/oliverjueguen/zip2hashcat
 
 ```
 positional arguments:
-  zipfile               Path to password-protected ZIP file
+  zipfile               Path to password-protected ZIP file(s)
 
 options:
   -o, --output          Save hash to file
   -q, --quiet           Only output the hash (for piping)
+  --json                Output results as JSON
   --info                Show ZIP encryption info only
   -V, --version         Print version and exit
   -h, --help            Show help message and exit
@@ -124,10 +125,14 @@ Uses the current `$pkzip$` format (not the legacy `$pkzip2$` which had [checksum
 | Dependency | Requires John the Ripper | **Standalone** (pure Python) |
 | Output format | John format (needs `cut -d ':' -f 2`) | **hashcat-ready** |
 | Mode detection | Manual | **Automatic** |
-| Hash format | `$pkzip2$` (legacy, known bugs) | `$pkzip$` (current) |
+| Hash format | `$pkzip$` / `$pkzip2$` (older versions) | `$pkzip$` (current) |
 | Ready-to-use commands | ❌ | ✅ |
 | AES support | Via zip2john | **Native** |
 | Install | Full John suite | **Single file wget** |
+
+## Author
+
+Made by [@oliverjueguen](https://github.com/oliverjueguen)
 
 ## License
 

@@ -18,8 +18,8 @@ Usage:
     ./zip2hashcat.py *.zip --json
 """
 # ----------------------------------------------------------------------------
-# AUTO-GENERATED -- do not edit by hand.
-# Run:  python scripts/build_standalone.py
+# Standalone build — generated from the package source by scripts/build_standalone.py
+# To regenerate: python scripts/build_standalone.py
 # ----------------------------------------------------------------------------
 
 __version__ = "1.1.0"
@@ -551,9 +551,6 @@ Examples:
     if errors:
         sys.exit(1)
 
-
-if __name__ == "__main__":
-    main()
 
 if __name__ == "__main__":
     main()
