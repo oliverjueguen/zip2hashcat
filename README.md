@@ -53,7 +53,7 @@ pip install git+https://github.com/oliverjueguen/zip2hashcat
 
 ```
 ╔════════════════════════════════════════╗
-║  zip2hashcat v1.0.0                   ║
+║  zip2hashcat v1.1.0                   ║
 ╚════════════════════════════════════════╝
 
   File:         secret.zip
